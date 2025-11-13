@@ -13,18 +13,20 @@ st.title("🦆 DuckIQ — Promo Trends Dashboard")
 st.caption("Monitor the evolution of promotional performance metrics over time.")
 
 # --- Load Data ---
-@st.cache_data(ttl=60)
 def load_promo_history():
-    con = duckdb.connect(DB_PATH, read_only=True)
     try:
+        con = duckdb.connect(DB_PATH, read_only=True)
         df = con.execute("SELECT * FROM promo_summary_scores").fetchdf()
+        con.close()
     except Exception as e:
         st.error(f"Error reading promo_summary_scores: {e}")
-        df = pd.DataFrame()
-    con.close()
+        return pd.DataFrame()
+
     if "run_timestamp" in df.columns:
         df["run_timestamp"] = pd.to_datetime(df["run_timestamp"])
+
     return df
+
 
 df = load_promo_history()
 
