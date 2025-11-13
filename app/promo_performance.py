@@ -84,8 +84,8 @@ def compute_promo_metrics():
     conn.execute("""
         INSERT INTO promo_summary_scores
         SELECT run_id, run_timestamp, Item_Code, Description, Supplier,
-               Promo_Uplift_%, Promo_Coverage_%, Promo_Price_Impact_%,
-               Baseline_Avg_Price, Promo_Avg_Price
+            "Promo_Uplift_%", "Promo_Coverage_%", "Promo_Price_Impact_%",
+            Baseline_Avg_Price, Promo_Avg_Price
         FROM tmp_promo
     """)
     conn.unregister("tmp_promo")
