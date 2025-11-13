@@ -1,11 +1,28 @@
 # app/promo_performance.py
 import pandas as pd
 import numpy as np
+import uuid
 from datetime import datetime
 import pytz
 from .db import get_db
 
 EAT_TZ = pytz.timezone("Africa/Nairobi")
+
+def ensure_promo_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_summary_scores (
+            run_id VARCHAR,
+            run_timestamp TIMESTAMP,
+            Item_Code VARCHAR,
+            Description VARCHAR,
+            Supplier VARCHAR,
+            Promo_Uplift_% DOUBLE,
+            Promo_Coverage_% DOUBLE,
+            Promo_Price_Impact_% DOUBLE,
+            Baseline_Avg_Price DOUBLE,
+            Promo_Avg_Price DOUBLE
+        )
+    """)
 
 def compute_promo_metrics():
     conn = get_db()
@@ -14,24 +31,20 @@ def compute_promo_metrics():
     if df.empty:
         return {"error": "No data found in sales table."}
 
-    # --- Clean & compute derived fields ---
+    # Derived fields
     df["unit_price"] = df["Total Sales"] / df["Quantity"].replace(0, np.nan)
     df["Date Of Sale"] = pd.to_datetime(df["Date Of Sale"], errors="coerce")
     df = df.dropna(subset=["RRP", "Quantity", "Total Sales"])
-    
-    # Identify promo flag (price < 90% of RRP)
     df["is_promo"] = df["unit_price"] < (0.9 * df["RRP"])
-    
-    # Group baseline (non-promo) vs promo per SKU
+
     sku_groups = []
     for sku, group in df.groupby("Item_Code"):
         promo = group[group["is_promo"]]
         base = group[~group["is_promo"]]
 
         if len(base) == 0 or len(promo) == 0:
-            continue  # skip SKUs with no variation
+            continue
 
-        # Compute metrics
         baseline_units = base["Quantity"].mean()
         promo_units = promo["Quantity"].mean()
         promo_uplift = ((promo_units - baseline_units) / baseline_units) * 100 if baseline_units > 0 else np.nan
@@ -59,10 +72,26 @@ def compute_promo_metrics():
     if results_df.empty:
         return {"message": "No significant promo patterns detected."}
 
-    # Identify top performing SKUs
-    top_skus = results_df.sort_values("Promo_Uplift_%", ascending=False).head(5).to_dict(orient="records")
+    # Persist results to DuckDB
+    ensure_promo_table(conn)
+    run_id = str(uuid.uuid4())
+    run_ts = datetime.now(EAT_TZ)
 
-    # Compute summary insights for a Bidco stakeholder
+    results_df["run_id"] = run_id
+    results_df["run_timestamp"] = run_ts
+
+    conn.register("tmp_promo", results_df)
+    conn.execute("""
+        INSERT INTO promo_summary_scores
+        SELECT run_id, run_timestamp, Item_Code, Description, Supplier,
+               Promo_Uplift_%, Promo_Coverage_%, Promo_Price_Impact_%,
+               Baseline_Avg_Price, Promo_Avg_Price
+        FROM tmp_promo
+    """)
+    conn.unregister("tmp_promo")
+
+    # Compute summary insights
+    top_skus = results_df.sort_values("Promo_Uplift_%", ascending=False).head(5).to_dict(orient="records")
     avg_uplift = results_df["Promo_Uplift_%"].mean()
     avg_coverage = results_df["Promo_Coverage_%"].mean()
 
@@ -73,7 +102,8 @@ def compute_promo_metrics():
     ]
 
     return {
-        "run_timestamp": datetime.now(EAT_TZ).isoformat(),
+        "run_id": run_id,
+        "run_timestamp": run_ts.isoformat(),
         "summary": {
             "avg_promo_uplift_%": round(avg_uplift, 2),
             "avg_promo_coverage_%": round(avg_coverage, 2),
