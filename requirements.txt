@@ -6,3 +6,5 @@ openpyxl
 pydantic
 pytz
 pytest
+streamlit
+plotly
