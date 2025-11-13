@@ -55,15 +55,15 @@ if sku_filter != "All":
 trend_df = (
     filtered_df.groupby("run_timestamp")
     .agg({
-        '"Promo_Uplift_%"': "mean",
-        '"Promo_Coverage_%"': "mean",
-        '"Promo_Price_Impact_%"': "mean"
+        "Promo_Uplift_%": "mean",
+        "Promo_Coverage_%": "mean",
+        "Promo_Price_Impact_%": "mean"
     })
     .reset_index()
     .rename(columns={
-        '"Promo_Uplift_%"': "Avg_Uplift_%", 
-        '"Promo_Coverage_%"': "Avg_Coverage_%", 
-        '"Promo_Price_Impact_%"': "Avg_Price_Impact_%"
+        "Promo_Uplift_%": "Avg_Uplift_%", 
+        "Promo_Coverage_%": "Avg_Coverage_%", 
+        "Promo_Price_Impact_%": "Avg_Price_Impact_%"
     })
 )
 
