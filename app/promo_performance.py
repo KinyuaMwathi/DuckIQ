@@ -16,9 +16,9 @@ def ensure_promo_table(conn):
             Item_Code VARCHAR,
             Description VARCHAR,
             Supplier VARCHAR,
-            Promo_Uplift_% DOUBLE,
-            Promo_Coverage_% DOUBLE,
-            Promo_Price_Impact_% DOUBLE,
+            "Promo_Uplift_%" DOUBLE,
+            "Promo_Coverage_%" DOUBLE,
+            "Promo_Price_Impact_%" DOUBLE,
             Baseline_Avg_Price DOUBLE,
             Promo_Avg_Price DOUBLE
         )
