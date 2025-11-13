@@ -2,6 +2,7 @@
 import streamlit as st
 import duckdb
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import datetime
 import os, tempfile, shutil
@@ -30,6 +31,23 @@ def load_price_index_data():
         return pd.DataFrame()
 
 df = load_price_index_data()
+
+# --- Additional Helper: Load Raw Competitor Data for Drill-Down ---
+def load_competitor_data():
+    try:
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".duckdb").name
+        shutil.copy(DB_PATH, tmp_file)
+        con = duckdb.connect(tmp_file, read_only=True)
+        df = con.execute("SELECT * FROM sales").fetchdf()
+        con.close()
+        os.remove(tmp_file)
+
+        df["unit_price"] = df["Total Sales"] / df["Quantity"].replace(0, np.nan)
+        df = df.dropna(subset=["unit_price", "Supplier", "Store Name", "Sub-Department"])
+        return df
+    except Exception as e:
+        st.error(f"Error loading competitor data: {e}")
+        return pd.DataFrame()
 
 if df.empty:
     st.warning("No price index data found. Run /price_index to generate results.")
@@ -124,6 +142,92 @@ st.dataframe(
     use_container_width=True,
     height=400
 )
+
+# --- Competitor Drill-Down ---
+st.markdown("---")
+st.subheader("🏁 Competitor Drill-Down: Bidco vs Other Suppliers")
+
+comp_df = load_competitor_data()
+
+if comp_df.empty:
+    st.info("No sales data available for competitor comparison.")
+else:
+    store_choice = st.selectbox(
+        "Select Store for Drill-Down",
+        sorted(comp_df["Store Name"].dropna().unique().tolist()),
+        index=0
+    )
+    subdept_choice = st.selectbox(
+        "Select Sub-Department for Drill-Down",
+        sorted(comp_df["Sub-Department"].dropna().unique().tolist()),
+        index=0
+    )
+
+    subset = comp_df[
+        (comp_df["Store Name"] == store_choice) &
+        (comp_df["Sub-Department"] == subdept_choice)
+    ]
+
+    if subset.empty:
+        st.warning("No data found for that store/sub-department combination.")
+    else:
+        # --- Clean supplier names for robust Bidco matching ---
+        subset["Supplier_clean"] = (
+            subset["Supplier"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"[\u200B-\u200D\uFEFF]", "", regex=True)
+            .str.lower()
+        )
+
+        bidco_mask = subset["Supplier_clean"].str.contains("bidco", na=False)
+        bidco_rows = subset[bidco_mask]
+
+        if bidco_rows.empty:
+            bidco_price = np.nan
+        else:
+            bidco_price = bidco_rows["unit_price"].mean()
+
+        # Step 1 — Show Bidco price label
+        if pd.notna(bidco_price) and not np.isnan(bidco_price):
+            st.info(f"💡 Bidco’s average unit price in {store_choice} — {subdept_choice}: **KES {bidco_price:.2f}**")
+        else:
+            st.warning("⚠️ No Bidco records found in this store/sub-department selection.")
+
+        # --- Compute grouped competitor averages ---
+        grouped = (
+            subset.groupby("Supplier", as_index=False)
+            .agg({"unit_price": "mean"})
+            .sort_values("unit_price", ascending=False)
+        )
+
+        grouped["Price_Index_vs_Bidco"] = (
+            (grouped["unit_price"] / bidco_price) * 100
+            if pd.notna(bidco_price)
+            else None
+        )
+
+        # Step 2 — Highlight Bidco distinctly
+        grouped["Bar_Color"] = grouped["Supplier"].apply(
+            lambda x: "Bidco" if "bidco" in str(x).lower() else "Competitor"
+        )
+
+        fig3 = px.bar(
+            grouped,
+            x="Supplier",
+            y="unit_price",
+            color="Bar_Color",
+            color_discrete_map={"Bidco": "#0078D7", "Competitor": "#D3D3D3"},
+            title=f"Bidco vs Competitors in {store_choice} — {subdept_choice}",
+            text=grouped["Price_Index_vs_Bidco"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "")
+        )
+        fig3.update_layout(
+            xaxis_title="Supplier",
+            yaxis_title="Average Unit Price (KES)",
+            template="plotly_white",
+            showlegend=False
+        )
+        st.plotly_chart(fig3, use_container_width=True)
 
 st.markdown("---")
 st.caption("Data source: DuckIQ price_index_scores (DuckDB)")
