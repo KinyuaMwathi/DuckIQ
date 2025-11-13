@@ -105,5 +105,53 @@ st.markdown("### 🧾 Historical Promo Summary")
 trend_df_display = trend_df.sort_values("run_timestamp", ascending=False)
 st.dataframe(trend_df_display, use_container_width=True, height=400)
 
+# --- Supplier-Level Comparison ---
+st.markdown("---")
+st.subheader("🏷️ Supplier Promo Performance Over Time")
+
+# Only show if more than one supplier exists
+if filtered_df["Supplier"].nunique() > 1:
+    supplier_trend = (
+        filtered_df.groupby(["run_timestamp", "Supplier"])
+        .agg({
+            "Promo_Uplift_%": "mean",
+            "Promo_Coverage_%": "mean",
+            "Promo_Price_Impact_%": "mean"
+        })
+        .reset_index()
+    )
+
+    # Allow metric selection
+    metric_choice = st.selectbox(
+        "Select metric to compare suppliers:",
+        ["Promo_Uplift_%", "Promo_Coverage_%", "Promo_Price_Impact_%"],
+        index=0
+    )
+
+    fig2 = px.line(
+        supplier_trend,
+        x="run_timestamp",
+        y=metric_choice,
+        color="Supplier",
+        markers=True,
+        title=f"{metric_choice.replace('_', ' ')} by Supplier Over Time",
+        template="plotly_white"
+    )
+    fig2.update_layout(
+        xaxis_title="Run Timestamp",
+        yaxis_title=f"{metric_choice} (%)",
+        legend_title="Supplier"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Display comparison table
+    st.markdown("### 🧾 Supplier Comparison Summary")
+    latest_run_ts = supplier_trend["run_timestamp"].max()
+    latest_df = supplier_trend[supplier_trend["run_timestamp"] == latest_run_ts]
+    latest_df = latest_df.sort_values(metric_choice, ascending=False)
+    st.dataframe(latest_df, use_container_width=True)
+else:
+    st.info("Only one supplier found — comparison not available.")
+
 st.markdown("---")
 st.caption("Data source: DuckIQ promo_summary_scores (DuckDB)")
