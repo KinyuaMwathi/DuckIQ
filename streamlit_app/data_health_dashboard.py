@@ -4,6 +4,7 @@ import duckdb
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import tempfile, shutil, os
 
 DB_PATH = "data/duckiq.duckdb"
 
@@ -13,7 +14,7 @@ if "data_health_configured" not in st.session_state:
     st.session_state["data_health_configured"] = True
 
 # ----------------------------------------------------------------
-# WRAPPER FUNCTION (New)
+# WRAPPER FUNCTION
 # ----------------------------------------------------------------
 def render_data_health_dashboard():
 
@@ -26,19 +27,37 @@ def render_data_health_dashboard():
     )
     st.sidebar.caption(f"📦 Database: `{DB_PATH}`")
 
-    # --- Helper functions ---
+    # ----------------------------------------------------------------
+    # SAFE DUCKDB LOADER — FIXES WINDOWS FILE LOCKING
+    # ----------------------------------------------------------------
     @st.cache_data(ttl=60)
     def load_table(table_name: str) -> pd.DataFrame:
-        con = duckdb.connect(DB_PATH, read_only=True)
+        """
+        Safe DuckDB loader that avoids Windows file-locking by copying
+        the DB file to a temporary location and reading from the copy.
+        """
         try:
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".duckdb").name
+            shutil.copy(DB_PATH, tmp_file)
+
+            con = duckdb.connect(tmp_file, read_only=True)
             df = con.execute(f"SELECT * FROM {table_name}").fetchdf()
-        except Exception:
-            df = pd.DataFrame()
-        con.close()
+            con.close()
+
+            os.remove(tmp_file)
+
+        except Exception as e:
+            st.error(f"Error reading table '{table_name}': {e}")
+            return pd.DataFrame()
+
         if "run_timestamp" in df.columns:
             df["run_timestamp"] = pd.to_datetime(df["run_timestamp"])
+
         return df
 
+    # ----------------------------------------------------------------
+    # COLOR FORMATTER
+    # ----------------------------------------------------------------
     def format_score_color(score: float) -> str:
         if score >= 90:
             return "✅"
@@ -47,11 +66,13 @@ def render_data_health_dashboard():
         else:
             return "🔴"
 
-    # --- Layout ---
+    # ----------------------------------------------------------------
+    # PAGE TITLE
+    # ----------------------------------------------------------------
     st.title("🦆 DuckIQ — Data Health Monitoring")
     st.caption("Track and compare store & supplier data reliability over time.")
 
-    # Load data
+    # Load data safely
     store_df = load_table("store_health_scores")
     supplier_df = load_table("supplier_health_scores")
 
@@ -86,11 +107,14 @@ def render_data_health_dashboard():
         # --- Latest snapshot cards ---
         cols = st.columns(2)
         if not store_df.empty:
-            latest_store_score = store_df.sort_values("run_timestamp").groupby("store_name").tail(1)["score"].mean()
-            cols[0].metric("🏬 Avg Store Health", f"{latest_store_score:.1f}", delta=None)
+            latest_store_score = store_df.sort_values("run_timestamp") \
+                .groupby("store_name").tail(1)["score"].mean()
+            cols[0].metric("🏬 Avg Store Health", f"{latest_store_score:.1f}")
+
         if not supplier_df.empty:
-            latest_sup_score = supplier_df.sort_values("run_timestamp").groupby("supplier").tail(1)["score"].mean()
-            cols[1].metric("🏢 Avg Supplier Health", f"{latest_sup_score:.1f}", delta=None)
+            latest_sup_score = supplier_df.sort_values("run_timestamp") \
+                .groupby("supplier").tail(1)["score"].mean()
+            cols[1].metric("🏢 Avg Supplier Health", f"{latest_sup_score:.1f}")
 
         # --- Trend chart ---
         st.markdown("### 📈 Average Health Score Over Time")
@@ -114,6 +138,7 @@ def render_data_health_dashboard():
         # --- Distribution snapshot ---
         st.markdown("### 📊 Latest Distribution of Scores")
         col1, col2 = st.columns(2)
+
         if not store_df.empty:
             latest_ts = store_df["run_timestamp"].max()
             latest_store = store_df[store_df["run_timestamp"] == latest_ts]
@@ -123,6 +148,7 @@ def render_data_health_dashboard():
                 color_discrete_sequence=["#0078D4"]
             )
             col1.plotly_chart(fig_store, use_container_width=True)
+
         if not supplier_df.empty:
             latest_ts = supplier_df["run_timestamp"].max()
             latest_sup = supplier_df[supplier_df["run_timestamp"] == latest_ts]
@@ -138,22 +164,33 @@ def render_data_health_dashboard():
     # ----------------------------------------------------------------
     elif view == "Store Health":
         st.subheader("🏬 Store-Level Data Health")
+
         if store_df.empty:
             st.warning("No store health data found. Run /data_health first.")
             st.stop()
 
         df_latest = store_df.sort_values("run_timestamp").groupby("store_name").tail(1)
-        st.markdown("### 🧾 Latest Store Scores")
         df_latest["status"] = df_latest["score"].apply(format_score_color)
+
+        st.markdown("### 🧾 Latest Store Scores")
         st.dataframe(
-            df_latest[["store_name", "score", "status", "missing_rrp_pct",
-                       "missing_supplier_pct", "negative_qty_pct",
-                       "extreme_price_pct", "notes"]],
+            df_latest[[ 
+                "store_name", "score", "status",
+                "missing_rrp_pct", "missing_supplier_pct",
+                "negative_qty_pct", "extreme_price_pct", "notes"
+            ]],
             use_container_width=True
         )
 
-        store_selected = st.selectbox("Select Store", sorted(store_df["store_name"].unique()))
+        # UNIQUE KEY FIX
+        store_selected = st.selectbox(
+            "Select Store",
+            sorted(store_df["store_name"].unique()),
+            key="dh_store_select"
+        )
+
         df_trend = store_df[store_df["store_name"] == store_selected]
+
         fig = px.line(
             df_trend, x="run_timestamp", y="score",
             title=f"{store_selected} — Health Score Trend",
@@ -166,18 +203,24 @@ def render_data_health_dashboard():
     # ----------------------------------------------------------------
     else:
         st.subheader("🏢 Supplier-Level Data Health")
+
         if supplier_df.empty:
             st.warning("No supplier health data found. Run /supplier_health first.")
             st.stop()
 
         df_latest = supplier_df.sort_values("run_timestamp").groupby("supplier").tail(1)
-        st.markdown("### 🧾 Latest Supplier Scores")
         df_latest["status"] = df_latest["score"].apply(format_score_color)
+
+        st.markdown("### 🧾 Latest Supplier Scores")
         st.dataframe(
-            df_latest[["supplier", "score", "status", "missing_rrp_pct",
-                       "negative_qty_pct", "extreme_price_pct",
-                       "supplier_drift_flag", "notes"]]);
-        
+            df_latest[[ 
+                "supplier", "score", "status",
+                "missing_rrp_pct", "negative_qty_pct",
+                "extreme_price_pct", "supplier_drift_flag", "notes"
+            ]],
+            use_container_width=True
+        )
+
         # Drift summary
         st.markdown("### ⚠️ Supplier Drift Summary")
         drift_df = df_latest[df_latest["supplier_drift_flag"] == True]
@@ -187,9 +230,15 @@ def render_data_health_dashboard():
             st.error(f"{len(drift_df)} suppliers show drift:")
             st.dataframe(drift_df[["supplier", "notes", "score"]])
 
-        # Trend chart
-        sup_selected = st.selectbox("Select Supplier", sorted(supplier_df["supplier"].unique()))
+        # UNIQUE KEY FIX
+        sup_selected = st.selectbox(
+            "Select Supplier",
+            sorted(supplier_df["supplier"].unique()),
+            key="dh_supplier_select"
+        )
+
         df_trend = supplier_df[supplier_df["supplier"] == sup_selected]
+
         fig = px.line(
             df_trend, x="run_timestamp", y="score",
             title=f"{sup_selected} — Health Score Trend",
