@@ -19,7 +19,7 @@ This project implements a **lightweight commercial analytics platform** focused 
 3. **Promo Trends Over Time**
 4. **Price Index & Competitor Price Comparison**
 
-It satisfies the interview requirement by providing **both**:
+It satisfies the requirements by providing **both**:
 
 * **(2A)** A simple, clean **Streamlit dashboard**
 * **(2B)** A simple **FastAPI service** exposing JSON endpoints
