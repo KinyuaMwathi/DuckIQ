@@ -250,6 +250,5 @@ DuckIQ/
 ## 7. 📬 Contact
 
 Prepared by **Charles Mwathi**  
-For **DuckIQ**
 
 ---
