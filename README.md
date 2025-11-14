@@ -102,10 +102,8 @@ http://127.0.0.1:8000/docs
 | Endpoint                            | Description                                             |
 | ----------------------------------- | ------------------------------------------------------- |
 | `/data_quality`                     | Computes & returns store health metrics                 |
-| `/supplier_health`                  | Validates supplier consistency, drift, and missing data |
 | `/promo_summary`                    | Computes uplift, coverage, price impact for promotions  |
 | `/price_index`                      | Computes Bidco price index vs competitor pricing        |
-| `/health_runs`, `/promo_runs`, etc. | Returns historical "runs" stored in DuckDB              |
 
 Every endpoint writes its results into DuckDB so that both **Streamlit** and **FastAPI** share the same analytic layer.
 
