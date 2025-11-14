@@ -137,7 +137,7 @@ Every endpoint writes its results into DuckDB so that both **Streamlit** and **F
 
 ### Why this design?
 
-* **Single source of truth** → Streamlit and FastAPI both read/write from DuckDB
+* **Single source of truth** → Streamlit and FastAPI both read from DuckDB
 * **Portable & reproducible** → DuckDB requires no server
 * **Fast queries** → OLAP-optimized columnar engine
 * **Testable** → FastAPI endpoints can be tested independently
