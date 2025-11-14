@@ -1,19 +1,100 @@
 # app/main.py
 from fastapi import FastAPI
-from .routes_health import router as health_router
-from .routes_supplier_health import router as supplier_health_router
-from .routes_promo import router as promo_router
-from .routes_price import router as price_router
-from .db import get_db, load_sales_data
+import duckdb
+import pandas as pd
+import tempfile, shutil, os
 
-app = FastAPI(title="DuckIQ Data Health API")
+DB_PATH = "data/duckiq.duckdb"
 
-@app.on_event("startup")
-def startup_event():
-    conn = get_db()
-    load_sales_data(conn)  # Load Excel into DuckDB on startup
+app = FastAPI(title="DuckIQ API", version="1.0")
 
-app.include_router(health_router)
-app.include_router(supplier_health_router)
-app.include_router(promo_router)
-app.include_router(price_router)
+# ---------------------------------------------------------
+# Safe DuckDB loader — avoids Windows file locking
+# ---------------------------------------------------------
+def load_table(table_name: str) -> pd.DataFrame:
+    try:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".duckdb").name
+        shutil.copy(DB_PATH, tmp)
+
+        con = duckdb.connect(tmp, read_only=True)
+        df = con.execute(f"SELECT * FROM {table_name}").fetchdf()
+        con.close()
+
+        os.remove(tmp)
+        return df
+
+    except Exception:
+        return pd.DataFrame()
+
+
+# ---------------------------------------------------------
+# Root + Health Check
+# ---------------------------------------------------------
+@app.get("/")
+def root():
+    return {"message": "DuckIQ API is running", "docs": "/docs"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------
+# DATA QUALITY ENDPOINT
+# ---------------------------------------------------------
+@app.get("/data_quality")
+def data_quality():
+    store_df = load_table("store_health_scores")
+    supplier_df = load_table("supplier_health_scores")
+
+    if store_df.empty and supplier_df.empty:
+        return {"error": "No data available"}
+
+    return {
+        "store_health": store_df.to_dict(orient="records"),
+        "supplier_health": supplier_df.to_dict(orient="records")
+    }
+
+
+# ---------------------------------------------------------
+# PROMOTION SUMMARY ENDPOINT
+# ---------------------------------------------------------
+@app.get("/promo_summary")
+def promo_summary():
+    df = load_table("promo_summary_scores")
+
+    if df.empty:
+        return {"error": "No promo data available"}
+
+    return {
+        "latest_run": str(df["run_timestamp"].max()),
+        "summary": {
+            "avg_uplift": df["Promo_Uplift_%"].mean(),
+            "avg_coverage": df["Promo_Coverage_%"].mean(),
+            "avg_price_impact": df["Promo_Price_Impact_%"].mean(),
+            "sku_count": df["Item_Code"].nunique()
+        },
+        "details": df.to_dict(orient="records")
+    }
+
+
+# ---------------------------------------------------------
+# PRICE INDEX ENDPOINT
+# ---------------------------------------------------------
+@app.get("/price_index")
+def price_index():
+    df = load_table("price_index_scores")
+
+    if df.empty:
+        return {"error": "No price index data available"}
+
+    return {
+        "latest_run": str(df["run_timestamp"].max()),
+        "summary": {
+            "avg_index": df["Price_Index"].mean(),
+            "avg_discount": df["Bidco_vs_RRP_Discount"].mean(),
+            "store_count": df["Store_Name"].nunique()
+        },
+        "details": df.to_dict(orient="records")
+    }
